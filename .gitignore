@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+.pytest_cache/
+
+# Local training data can grow large; keep existing tracked samples.
+recordings/*
+!recordings/.gitkeep
