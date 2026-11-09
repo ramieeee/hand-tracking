@@ -18,8 +18,11 @@ common/
   recording.py          JSONL 스트리밍 저장 및 JSON/JSONL 읽기
 gestures/
   detectors.py          OK, 말하는 손, MediaPipe 카테고리 판정
+  asl_alphabet.py       ASL 수동 자모의 기하 기준선
+research/
+  asl-fingerspelling/   핑거스펠링 구현에 쓴 논문과 데이터 출처
 recordings/             로컬 녹화 데이터
-tests/                  녹화 저장 검증
+tests/                  녹화 저장 및 자모 판정 검증
 ```
 
 `opencv-python`, `mediapipe`, `numpy`가 설치된 Python 환경에서 실행합니다.
@@ -37,6 +40,8 @@ python main.py
 - 시작: 말하는 손 제스처 3회
 - 완료: OK 1초 유지
 - 취소: 주먹 2초 유지
+- 녹화 중 화면의 `ASL`은 현재 손 모양의 알파벳 후보이다. 한 글자를 약 0.32초 유지하면 철자 문자열에 들어간다. J와 Z는 같은 손 모양이 이어지는 동안의 손가락 궤적으로 구분한다.
+- 완료 시점의 OK는 알파벳 F와 같은 손 모양이므로, 마지막 1초는 철자에서 뺀다. 주먹을 2초 유지하면 녹화가 취소되어 철자는 저장되지 않는다.
 - `F`: 전체 화면 전환, `N`: 완료 후 새 녹화 대기, `S`: 평활화 전환, `R`: 추적 초기화, `Q`/ESC: 종료
 
 ## 녹화 형식
@@ -46,7 +51,7 @@ python main.py
 1. `session`: 형식 버전(`gesture-landmarks-v3`), 의미 및 라벨 상태
 2. `frame`: 프레임별 시간 `t`와 양손의 정규화된 `[x, y, z]` 랜드마크
 3. `event`: 완료 시 기록하는 인식 제스처 구간
-4. `summary`: 완료 시 기록하는 전체 녹화 시간
+4. `summary`: 완료 시 기록하는 전체 녹화 시간과, 완료된 경우의 `fingerspelling` 가설 (`text`, `letters`, `method`)
 
 프레임마다 디스크에 기록하므로 녹화 길이에 비례해 프레임 목록을 메모리에 쌓지 않습니다. JSONL은 한 줄씩 읽을 수 있고, 들여쓰기를 제거해 기존 JSON보다 저장량도 줄어듭니다. 압축 형식은 아니므로 데이터가 더 커지면 완료된 파일의 gzip 압축이나 학습용 Parquet 변환을 별도로 고려할 수 있습니다.
 

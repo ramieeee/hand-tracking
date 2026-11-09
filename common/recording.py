@@ -27,10 +27,13 @@ class SessionRecorder:
     def append_frame(self, frame):
         self._write({'type': 'frame', **frame})
 
-    def finish(self, events, duration):
+    def finish(self, events, duration, fingerspelling=None):
         for event in events:
             self._write({'type': 'event', **event})
-        self._write({'type': 'summary', 'duration_seconds': round(duration, 3)})
+        summary = {'type': 'summary', 'duration_seconds': round(duration, 3)}
+        if fingerspelling is not None:
+            summary['fingerspelling'] = fingerspelling
+        self._write(summary)
         self.close()
         self.partial_path.rename(self.path)
         print('Saved:', self.path)

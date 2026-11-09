@@ -14,9 +14,11 @@ from common.filters import OneEuroFilter
 from common.geometry import mouth_aperture
 from common.recording import SessionRecorder
 from config import (
-    CAMERA_INDEX, CANCEL_HOLD, CAPTURE_SIZE, COLOURS, DISPLAY_FULLSCREEN, DISPLAY_SIZE,
-    DONE_HOLD, MAX_RECORD_SECONDS, MIN_EVENT_SECONDS, MODEL, RECORDINGS_DIR,
+    ASL_LETTER_GAP, ASL_MIN_HOLD, CAMERA_INDEX, CANCEL_HOLD, CAPTURE_SIZE, COLOURS,
+    DISPLAY_FULLSCREEN, DISPLAY_SIZE, DONE_HOLD, MAX_RECORD_SECONDS, MIN_EVENT_SECONDS,
+    MODEL, RECORDINGS_DIR,
 )
+from gestures.asl_alphabet import FingerspellingDecoder, classify_asl_letter
 from gestures.detectors import TalkDetector, get_category, is_ok
 from models.llm_chat import LLMChat
 
@@ -53,6 +55,7 @@ def main():
     executor = ThreadPoolExecutor(max_workers=1)
     llm_future = None
     llm_result = ''
+    speller = None
 
     def flush_event(side, now):
         label = active[side]
@@ -70,6 +73,7 @@ def main():
 
     fullscreen = DISPLAY_FULLSCREEN
     print('START: talking hand x3 | DONE: OK hold 1s | CANCEL: fist hold 2s')
+    print('ASL alphabet: hold each letter. J and Z need their movement.')
     print('F: fullscreen | S: smoothing | R: reset tracking | Q/ESC: quit')
     try:
         cv2.namedWindow('Gesture to LLM', cv2.WINDOW_NORMAL)
@@ -157,6 +161,7 @@ def main():
                     recording_start = now
                     events = []
                     recorder = SessionRecorder(RECORDINGS_DIR)
+                    speller = FingerspellingDecoder(ASL_MIN_HOLD, ASL_LETTER_GAP)
                     for side in COLOURS:
                         talk[side].reset()
                         holds[side] = {'OK': None, 'FIST': None}
@@ -165,7 +170,9 @@ def main():
                     status = 'RECORDING - OK 1s to finish / FIST 2s to cancel'
                     print('START: recording')
                 elif state == 'RECORDING':
-                    recorder.append_frame({'t': round(now - recording_start, 4), 'hands': frame_hands})
+                    relative = round(now - recording_start, 4)
+                    recorder.append_frame({'t': relative, 'hands': frame_hands})
+                    speller.update(relative, frame_hands)
                     if cancel_trigger:
                         state = 'IDLE'
                         events = []
@@ -178,13 +185,19 @@ def main():
                             holds[side] = {'OK': None, 'FIST': None}
                             active[side], active_start[side] = None, None
                         await_ok_release = False
+                        speller = None
                         print('CANCEL: discarded')
                     elif done_trigger or now - recording_start >= MAX_RECORD_SECONDS:
                         for side in COLOURS:
                             flush_event(side, now)
                         duration = now - recording_start
                         finished_by_done = done_trigger
-                        saved_path = recorder.finish(events, duration)
+                        spelled = speller.finish(
+                            round(duration, 4),
+                            trim_done_hold=DONE_HOLD if finished_by_done else 0.0,
+                        )
+                        speller = None
+                        saved_path = recorder.finish(events, duration, fingerspelling=spelled)
                         recorder = None
                         state = 'AWAIT_ASL_LABEL' if finished_by_done else 'IDLE'
                         recording_start = None
@@ -193,16 +206,18 @@ def main():
                             talk[side].reset()
                             holds[side] = {'OK': None, 'FIST': None}
                             active[side], active_start[side] = None, None
+                        spelled_text = spelled['text'] or '(none)'
                         if finished_by_done:
-                            status = 'What did that mean? ASL A-Z recogniser not yet installed'
-                            print('DONE: What did that mean?')
+                            status = f'Spelled: {spelled_text} | N for a new recording'
+                            print('ASL fingerspelling:', spelled_text)
+                            print('Geometric baseline of the ASL manual alphabet, not a translation of ASL.')
                             print('Raw two-hand landmarks saved:', saved_path)
-                            print('ASL fingerspelling requires a separate A-Z model; no label inferred.')
                             print('Press N to start a new recording, or Q to quit.')
                         else:
-                            status = '60s timeout - recording saved; talk x3 to restart'
-                        # Do not call the LLM before an ASL meaning has been learned.
-                        # Raw coordinates and MediaPipe categories are not semantic commands.
+                            status = f'60s timeout - spelled: {spelled_text}'
+                            print('ASL fingerspelling:', spelled_text)
+                        # The fingerspelling string is a geometric hypothesis, not a verified gloss.
+                        # Do not send it to the LLM as if it were a command.
 
                 if llm_future is not None and llm_future.done():
                     try:
@@ -217,13 +232,23 @@ def main():
                 if dt > 0:
                     fps_samples.append(1 / dt)
                 fps = sum(fps_samples) / len(fps_samples) if fps_samples else 0
+                asl_labels = {
+                    side: classify_asl_letter(frame_hands[side]) if frame_hands[side] is not None else None
+                    for side in COLOURS
+                }
+                spelled_now = speller.committed_text() if speller is not None else ''
                 cv2.rectangle(frame, (0, 0), (w, 155), (18, 18, 18), -1)
                 cv2.putText(frame, f'STATE: {state}', (12, 29), cv2.FONT_HERSHEY_SIMPLEX, 0.72,
                             (70, 245, 110) if state == 'RECORDING' else (245, 245, 245), 2)
-                cv2.putText(frame, f"LEFT: {labels['Left']}", (12, 57), cv2.FONT_HERSHEY_SIMPLEX, 0.56, COLOURS['Left'], 2)
-                cv2.putText(frame, f"RIGHT: {labels['Right']}", (12, 84), cv2.FONT_HERSHEY_SIMPLEX, 0.56, COLOURS['Right'], 2)
-                cv2.putText(frame, f'{w}x{h} | FPS: {fps:.1f} | Events: {len(events)} | Smooth: {smoothing}',
-                            (12, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (240, 240, 240), 1)
+                cv2.putText(frame, f"LEFT: {labels['Left']} | ASL {asl_labels['Left'] or '-'}",
+                            (12, 57), cv2.FONT_HERSHEY_SIMPLEX, 0.56, COLOURS['Left'], 2)
+                cv2.putText(frame, f"RIGHT: {labels['Right']} | ASL {asl_labels['Right'] or '-'}",
+                            (12, 84), cv2.FONT_HERSHEY_SIMPLEX, 0.56, COLOURS['Right'], 2)
+                cv2.putText(
+                    frame,
+                    f'{w}x{h} | FPS: {fps:.1f} | Spelled: {spelled_now or "-"} | Events: {len(events)}',
+                    (12, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (240, 240, 240), 1,
+                )
                 cv2.putText(frame, status[:78], (12, 139), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 230, 255), 1)
                 # Pass original pixels to HighGUI; preserve aspect ratio as the window scales.
                 cv2.imshow('Gesture to LLM', frame)

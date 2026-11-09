@@ -25,6 +25,18 @@ class RecordingTests(unittest.TestCase):
             self.assertIsNone(payload['meaning'])
             self.assertFalse(recorder.partial_path.exists())
 
+    def test_fingerspelling_summary_round_trip(self):
+        with tempfile.TemporaryDirectory() as folder:
+            recorder = SessionRecorder(folder)
+            fingerspelling = {
+                'text': 'CAT',
+                'hand': 'Right',
+                'letters': [],
+                'method': 'geometric-baseline-v1',
+            }
+            path = recorder.finish([], 1.2, fingerspelling=fingerspelling)
+            self.assertEqual(load_session(path)['fingerspelling'], fingerspelling)
+
     def test_cancel_removes_partial_data(self):
         with tempfile.TemporaryDirectory() as folder:
             recorder = SessionRecorder(folder)

@@ -1,5 +1,6 @@
 def request_interpretation(llm, payload):
     # An unlabelled landmark trajectory has no reliable semantic meaning.
+    # A fingerspelling hypothesis on the recording is not a verified gloss.
     # Only send known gesture labels; never ask an LLM to invent an interpretation.
     labels = [e['gesture'] for e in payload['events']]
     if not labels:

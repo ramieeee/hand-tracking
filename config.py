@@ -18,4 +18,7 @@ DONE_HOLD = 1.0
 CANCEL_HOLD = 2.0
 MAX_RECORD_SECONDS = 60.0
 MIN_EVENT_SECONDS = 0.18
+# Deliberate fingerspelling hold. Fluent coarticulated spelling is outside this baseline.
+ASL_MIN_HOLD = 0.32
+ASL_LETTER_GAP = 0.18
 
