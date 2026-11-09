@@ -8,12 +8,13 @@ import numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+from common.camera import open_camera, read_camera_frame
 from common.drawing import draw_hand
 from common.filters import OneEuroFilter
 from common.geometry import mouth_aperture
 from common.recording import SessionRecorder
 from config import (
-    CAMERA_INDEX, CANCEL_HOLD, CAPTURE_SIZE, COLOURS, DISPLAY_SIZE,
+    CAMERA_INDEX, CANCEL_HOLD, CAPTURE_SIZE, COLOURS, DISPLAY_FULLSCREEN, DISPLAY_SIZE,
     DONE_HOLD, MAX_RECORD_SECONDS, MIN_EVENT_SECONDS, MODEL, RECORDINGS_DIR,
 )
 from gestures.detectors import TalkDetector, get_category, is_ok
@@ -23,11 +24,7 @@ from models.llm_chat import LLMChat
 def main():
     if not MODEL.is_file():
         raise FileNotFoundError(f'Missing model: {MODEL}')
-    cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_AVFOUNDATION)
-    if not cap.isOpened():
-        raise RuntimeError(f'Cannot open camera index {CAMERA_INDEX}')
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAPTURE_SIZE[0])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAPTURE_SIZE[1])
+    cap = open_camera(cv2, CAMERA_INDEX, CAPTURE_SIZE)
     options = vision.GestureRecognizerOptions(
         base_options=python.BaseOptions(model_asset_path=str(MODEL)),
         running_mode=vision.RunningMode.VIDEO,
@@ -71,17 +68,26 @@ def main():
                 })
         active[side], active_start[side] = None, None
 
-    cv2.namedWindow('Gesture to LLM', cv2.WINDOW_NORMAL)
-    cv2.resizeWindow('Gesture to LLM', *DISPLAY_SIZE)
+    fullscreen = DISPLAY_FULLSCREEN
     print('START: talking hand x3 | DONE: OK hold 1s | CANCEL: fist hold 2s')
-    print('S: smoothing | R: reset tracking | Q/ESC: quit')
+    print('F: fullscreen | S: smoothing | R: reset tracking | Q/ESC: quit')
     try:
+        cv2.namedWindow('Gesture to LLM', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('Gesture to LLM', *DISPLAY_SIZE)
+        # Render and process window events before initializing the model or fullscreen.
+        initial_frame = read_camera_frame(cv2, cap)
+        if initial_frame is None:
+            return
+        cv2.imshow('Gesture to LLM', cv2.flip(initial_frame, 1))
+        cv2.waitKey(1)
+        if fullscreen:
+            cv2.setWindowProperty('Gesture to LLM', cv2.WND_PROP_FULLSCREEN,
+                                  cv2.WINDOW_FULLSCREEN)
         with vision.GestureRecognizer.create_from_options(options) as recognizer:
             while True:
-                ok, frame = cap.read()
-                if not ok or frame is None:
-                    time.sleep(0.02)
-                    continue
+                frame = read_camera_frame(cv2, cap)
+                if frame is None:
+                    break
                 frame = cv2.flip(frame, 1)
                 h, w = frame.shape[:2]
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -216,13 +222,20 @@ def main():
                             (70, 245, 110) if state == 'RECORDING' else (245, 245, 245), 2)
                 cv2.putText(frame, f"LEFT: {labels['Left']}", (12, 57), cv2.FONT_HERSHEY_SIMPLEX, 0.56, COLOURS['Left'], 2)
                 cv2.putText(frame, f"RIGHT: {labels['Right']}", (12, 84), cv2.FONT_HERSHEY_SIMPLEX, 0.56, COLOURS['Right'], 2)
-                cv2.putText(frame, f'FPS: {fps:.1f} | Events: {len(events)} | Smooth: {smoothing}',
+                cv2.putText(frame, f'{w}x{h} | FPS: {fps:.1f} | Events: {len(events)} | Smooth: {smoothing}',
                             (12, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (240, 240, 240), 1)
                 cv2.putText(frame, status[:78], (12, 139), cv2.FONT_HERSHEY_SIMPLEX, 0.44, (200, 230, 255), 1)
-                cv2.imshow('Gesture to LLM', cv2.resize(frame, DISPLAY_SIZE))
+                # Pass original pixels to HighGUI; preserve aspect ratio as the window scales.
+                cv2.imshow('Gesture to LLM', frame)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord('q'), 27):
                     break
+                if key == ord('f'):
+                    fullscreen = not fullscreen
+                    cv2.setWindowProperty('Gesture to LLM', cv2.WND_PROP_FULLSCREEN,
+                                          cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL)
+                    if not fullscreen:
+                        cv2.resizeWindow('Gesture to LLM', *DISPLAY_SIZE)
                 if key == ord('n') and state == 'AWAIT_ASL_LABEL':
                     state = 'IDLE'
                     status = 'Talk gesture x3 to start (previous sequence remains unlabelled)'

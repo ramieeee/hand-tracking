@@ -4,8 +4,11 @@ BASE = Path(__file__).resolve().parent
 MODEL = BASE / 'models' / 'gesture_recognizer.task'
 RECORDINGS_DIR = BASE / 'recordings'
 CAMERA_INDEX = 1
-CAPTURE_SIZE = (640, 480)
-DISPLAY_SIZE = (960, 720)
+# Built-in FaceTime camera. For a connected iPhone, check its index first;
+# the previously enumerated iPhone supported (1920, 1440).
+CAPTURE_SIZE = (1920, 1080)
+DISPLAY_SIZE = (1280, 960)  # Initial window size when fullscreen is disabled.
+DISPLAY_FULLSCREEN = False  # Toggle with F after the preview appears.
 COLOURS = {'Left': (255, 210, 40), 'Right': (210, 80, 255)}  # BGR
 PALM = [(0, 1, 5), (0, 5, 9), (0, 9, 13), (0, 13, 17), (5, 9, 13), (5, 13, 17)]
 FINGERS = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]]
